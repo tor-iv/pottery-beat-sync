@@ -16,6 +16,9 @@ export function ExportPanel() {
     videoMode,
     teaserDuration,
     bpm,
+    exportAudioMode,
+    setExportAudioMode,
+    selectedSongName,
   } = useProjectStore();
   const [showModal, setShowModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,12 +31,11 @@ export function ExportPanel() {
     setError(null);
     setExporting(true);
     setExportProgress(0);
-    setShowModal(true);
 
     try {
       const formData = new FormData();
 
-      // Add audio
+      // Add audio (always needed for timing, but may not be included in output)
       formData.append('audio', audio);
 
       // Add videos
@@ -48,6 +50,7 @@ export function ExportPanel() {
       formData.append('videoMode', videoMode);
       formData.append('teaserDuration', teaserDuration.toString());
       formData.append('bpm', (bpm || 120).toString());
+      formData.append('exportAudioMode', exportAudioMode);
 
       // Create EventSource for progress updates
       const progressSource = new EventSource('/api/export/progress');
@@ -119,8 +122,70 @@ export function ExportPanel() {
                     : 'Export complete!'}
                 </p>
               </div>
+            ) : exportProgress === 100 ? (
+              <div className="space-y-4">
+                <div className="bg-green-500/20 border border-green-500/50 rounded-lg p-4 text-center">
+                  <p className="text-green-400 font-medium">Export Complete!</p>
+                  {exportAudioMode === 'video-only' && selectedSongName && (
+                    <div className="mt-3 text-left">
+                      <p className="text-sm text-gray-300">Add this song in TikTok:</p>
+                      <p className="text-white font-medium mt-1">{selectedSongName}</p>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setShowModal(false);
+                    setExportProgress(0);
+                  }}
+                  className="w-full bg-primary-500 hover:bg-primary-600 text-white py-2 rounded transition-colors"
+                >
+                  Done
+                </button>
+              </div>
             ) : (
               <div className="space-y-4">
+                {/* Audio Mode Toggle */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Audio Export</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setExportAudioMode('video-only')}
+                      className={`px-3 py-2 rounded text-sm transition-colors ${
+                        exportAudioMode === 'video-only'
+                          ? 'bg-primary-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      Video Only
+                    </button>
+                    <button
+                      onClick={() => setExportAudioMode('include')}
+                      className={`px-3 py-2 rounded text-sm transition-colors ${
+                        exportAudioMode === 'include'
+                          ? 'bg-primary-500 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      With Audio
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {exportAudioMode === 'video-only'
+                      ? 'Add the song in TikTok for best algorithm performance'
+                      : 'Audio will be included in the video file'}
+                  </p>
+                </div>
+
+                {/* Song Reminder */}
+                {exportAudioMode === 'video-only' && selectedSongName && (
+                  <div className="bg-primary-500/20 border border-primary-500/50 rounded-lg p-3">
+                    <p className="text-xs text-primary-300">Remember to add in TikTok:</p>
+                    <p className="text-white font-medium text-sm">{selectedSongName}</p>
+                  </div>
+                )}
+
+                {/* Export Details */}
                 <div className="bg-gray-700/50 rounded p-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Duration</span>
@@ -141,7 +206,7 @@ export function ExportPanel() {
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Mode</span>
                     <span className="text-white">
-                      {videoMode === 'teaser' ? 'Teaser (finished pot first)' : 'Standard'}
+                      {videoMode === 'teaser' ? 'Teaser' : 'Standard'}
                     </span>
                   </div>
                 </div>
@@ -162,22 +227,10 @@ export function ExportPanel() {
                     disabled={!canExport}
                     className="flex-1 bg-primary-500 hover:bg-primary-600 disabled:bg-gray-600 text-white py-2 rounded transition-colors"
                   >
-                    Export Video
+                    Export
                   </button>
                 </div>
               </div>
-            )}
-
-            {exportProgress === 100 && (
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  setExportProgress(0);
-                }}
-                className="w-full mt-4 bg-primary-500 hover:bg-primary-600 text-white py-2 rounded transition-colors"
-              >
-                Done
-              </button>
             )}
           </div>
         </div>

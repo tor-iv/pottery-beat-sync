@@ -112,6 +112,7 @@ router.post(
       const videoMode = (req.body.videoMode || 'standard') as 'standard' | 'teaser';
       const teaserDuration = parseInt(req.body.teaserDuration) || 4;
       const bpm = parseInt(req.body.bpm) || 120;
+      const exportAudioMode = (req.body.exportAudioMode || 'include') as 'include' | 'video-only';
 
       // Export options
       const options: ExportOptions = {
@@ -125,6 +126,7 @@ router.post(
         videoMode,
         teaserDuration,
         bpm,
+        includeAudio: exportAudioMode === 'include',
         onProgress: (progress, stage, message) => {
           broadcastProgress(exportId, progress, stage, message);
         },

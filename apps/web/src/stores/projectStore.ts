@@ -39,6 +39,8 @@ export interface ProjectState {
   snippetSelection: 'quality' | 'even' | 'random';
   videoMode: 'standard' | 'teaser';
   teaserDuration: number; // Duration of the finished pot reveal at start (in beats)
+  exportAudioMode: 'include' | 'video-only'; // Whether to include audio in export
+  selectedSongName: string | null; // For reminding user what song to add in TikTok
 
   // Timeline
   timeline: Array<{
@@ -65,6 +67,8 @@ export interface ProjectState {
   setSnippetSelection: (value: 'quality' | 'even' | 'random') => void;
   setVideoMode: (mode: 'standard' | 'teaser') => void;
   setTeaserDuration: (beats: number) => void;
+  setExportAudioMode: (mode: 'include' | 'video-only') => void;
+  setSelectedSongName: (name: string | null) => void;
   setTimeline: (timeline: ProjectState['timeline']) => void;
   setExporting: (isExporting: boolean) => void;
   setExportProgress: (progress: number) => void;
@@ -82,6 +86,8 @@ const initialState = {
   snippetSelection: 'quality' as const,
   videoMode: 'standard' as const,
   teaserDuration: 4, // 4 beats for the finished pot reveal
+  exportAudioMode: 'video-only' as const, // Default to video-only for TikTok workflow
+  selectedSongName: null,
   timeline: [],
   isExporting: false,
   exportProgress: 0,
@@ -130,6 +136,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setVideoMode: (mode) => set({ videoMode: mode }),
 
   setTeaserDuration: (beats) => set({ teaserDuration: beats }),
+
+  setExportAudioMode: (mode) => set({ exportAudioMode: mode }),
+
+  setSelectedSongName: (name) => set({ selectedSongName: name }),
 
   setTimeline: (timeline) => set({ timeline }),
 

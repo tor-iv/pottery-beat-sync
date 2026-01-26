@@ -14,6 +14,7 @@ export interface ExportOptions {
   videoMode?: 'standard' | 'teaser';
   teaserDuration?: number; // Duration in beats
   bpm?: number;
+  includeAudio?: boolean;
   onProgress?: (progress: number, stage: string, message: string) => void;
 }
 
@@ -212,6 +213,7 @@ export async function exportVideo(options: ExportOptions): Promise<string> {
     videoMode = 'standard',
     teaserDuration = 4,
     bpm: providedBpm = 120,
+    includeAudio = true,
     onProgress,
   } = options;
 
@@ -310,10 +312,14 @@ export async function exportVideo(options: ExportOptions): Promise<string> {
   const tempVideo = path.join(tempDir, 'concat.mp4');
   await concatenateClips(concatFile, tempVideo);
 
-  onProgress?.(80, 'encoding', 'Adding audio...');
-
-  // Add audio
-  await addAudioToVideo(tempVideo, audioPath, outputPath, outputLength);
+  if (includeAudio) {
+    onProgress?.(80, 'encoding', 'Adding audio...');
+    await addAudioToVideo(tempVideo, audioPath, outputPath, outputLength);
+  } else {
+    onProgress?.(80, 'encoding', 'Finalizing video...');
+    // Just copy the video without audio
+    fs.copyFileSync(tempVideo, outputPath);
+  }
 
   onProgress?.(95, 'finalizing', 'Cleaning up...');
 

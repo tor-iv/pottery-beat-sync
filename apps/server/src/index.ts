@@ -8,6 +8,8 @@ import fs from 'fs';
 import audioRoutes from './routes/audio.js';
 import analyzeRoutes from './routes/analyze.js';
 import exportRoutes from './routes/export.js';
+import spotifyRoutes from './routes/spotify.js';
+import youtubeRoutes from './routes/youtube.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +32,8 @@ app.use('/output', express.static(outputDir));
 app.use('/api/audio', audioRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/export', exportRoutes);
+app.use('/api/spotify', spotifyRoutes);
+app.use('/api/youtube', youtubeRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -3,13 +3,13 @@
 import { useCallback, useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import { useBeatDetection } from '@/hooks/useBeatDetection';
+import { SongSearch } from './SongSearch';
 
 export function AudioUploader() {
   const { audio, setAudio, setAudioUrl } = useProjectStore();
   const { detectBeats, isDetecting } = useBeatDetection();
-  const [tiktokUrl, setTiktokUrl] = useState('');
-  const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'search' | 'upload'>('search');
 
   const handleFileDrop = useCallback(
     async (e: React.DragEvent) => {
@@ -41,38 +41,6 @@ export function AudioUploader() {
     },
     [setAudio, setAudioUrl, detectBeats]
   );
-
-  const handleTiktokExtract = useCallback(async () => {
-    if (!tiktokUrl.trim()) return;
-
-    setError(null);
-    setIsExtracting(true);
-
-    try {
-      const response = await fetch('/api/audio/extract-tiktok', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: tiktokUrl }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to extract audio');
-      }
-
-      const blob = await response.blob();
-      const file = new File([blob], 'tiktok-audio.mp3', { type: 'audio/mpeg' });
-      setAudio(file);
-      const url = URL.createObjectURL(file);
-      setAudioUrl(url);
-      await detectBeats(file);
-      setTiktokUrl('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to extract audio');
-    } finally {
-      setIsExtracting(false);
-    }
-  }, [tiktokUrl, setAudio, setAudioUrl, detectBeats]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -107,45 +75,57 @@ export function AudioUploader() {
 
   return (
     <div className="space-y-4">
-      {/* Drag and drop area */}
-      <div
-        onDrop={handleFileDrop}
-        onDragOver={handleDragOver}
-        className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-primary-500 transition-colors cursor-pointer"
-      >
-        <input
-          type="file"
-          accept="audio/*"
-          onChange={handleFileSelect}
-          className="hidden"
-          id="audio-upload"
-        />
-        <label htmlFor="audio-upload" className="cursor-pointer">
-          <div className="text-gray-400">
-            <span className="text-4xl block mb-2">&#128193;</span>
-            <p>Drop an audio file here or click to browse</p>
-            <p className="text-sm text-gray-500 mt-1">MP3, WAV, M4A supported</p>
-          </div>
-        </label>
-      </div>
-
-      {/* TikTok URL input */}
+      {/* Tabs */}
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={tiktokUrl}
-          onChange={(e) => setTiktokUrl(e.target.value)}
-          placeholder="Or paste a TikTok URL..."
-          className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500"
-        />
         <button
-          onClick={handleTiktokExtract}
-          disabled={isExtracting || !tiktokUrl.trim()}
-          className="bg-primary-500 hover:bg-primary-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded transition-colors"
+          onClick={() => setActiveTab('search')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'search'
+              ? 'bg-primary-500 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
         >
-          {isExtracting ? 'Extracting...' : 'Extract'}
+          Find a Song
+        </button>
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'upload'
+              ? 'bg-primary-500 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          Upload File
         </button>
       </div>
+
+      {activeTab === 'search' ? (
+        <SongSearch />
+      ) : (
+        <>
+          {/* Drag and drop area */}
+          <div
+            onDrop={handleFileDrop}
+            onDragOver={handleDragOver}
+            className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-primary-500 transition-colors cursor-pointer"
+          >
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={handleFileSelect}
+              className="hidden"
+              id="audio-upload"
+            />
+            <label htmlFor="audio-upload" className="cursor-pointer">
+              <div className="text-gray-400">
+                <span className="text-4xl block mb-2">&#128193;</span>
+                <p>Drop an audio file here or click to browse</p>
+                <p className="text-sm text-gray-500 mt-1">MP3, WAV, M4A supported</p>
+              </div>
+            </label>
+          </div>
+        </>
+      )}
 
       {/* Status messages */}
       {isDetecting && (
