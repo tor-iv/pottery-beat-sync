@@ -1,0 +1,19 @@
+{
+  "name": "pottery-beat-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Video beat sync tool for creating TikTok pottery videos",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:server": "npm run dev -w apps/server",
+    "build": "npm run build --workspaces --if-present",
+    "setup": "bash scripts/setup.sh"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
