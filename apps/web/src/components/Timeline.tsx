@@ -15,7 +15,12 @@ export function Timeline() {
     setTimeline,
     videoMode,
     teaserDuration,
+    currentPlaybackTime,
+    isPreviewPlaying,
   } = useProjectStore();
+
+  // Effective output length is the minimum of selected length and actual audio duration
+  const effectiveLength = audioDuration ? Math.min(outputLength, audioDuration) : outputLength;
 
   // Calculate timeline based on sync points
   const generatedTimeline = useMemo(() => {
@@ -23,8 +28,8 @@ export function Timeline() {
       return [];
     }
 
-    // Filter sync points within output length
-    const relevantSyncPoints = syncPoints.filter(sp => sp.time < outputLength);
+    // Filter sync points within effective length (respects audio duration)
+    const relevantSyncPoints = syncPoints.filter(sp => sp.time < effectiveLength);
 
     if (relevantSyncPoints.length === 0) {
       return [];
@@ -34,24 +39,21 @@ export function Timeline() {
     const finishingVideo = videos.find((v) => v.label === 'Finishing');
     const nonFinishingVideos = videos.filter((v) => v.label !== 'Finishing');
 
-    // Collect all snippets from segments (excluding Finishing for teaser mode)
-    // Sort by pottery stage order so timeline progresses through the process
+    // Sort videos by pottery stage order so timeline progresses through the process
     const videosForTimeline = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videos;
     const sortedVideos = sortVideosByStage(videosForTimeline);
-    const allSnippets = sortedVideos.flatMap((v) =>
-      v.snippets.map((s) => ({ ...s, segmentLabel: v.label }))
-    );
 
     const timelineEntries: typeof timeline = [];
 
     // In teaser mode, start with the finishing shot
     let startIndex = 0;
     if (videoMode === 'teaser' && finishingVideo && finishingVideo.snippets.length > 0) {
-      const firstSyncTime = relevantSyncPoints[0]?.time || 0;
       const teaserEndTime = Math.min(teaserDuration, relevantSyncPoints[1]?.time || teaserDuration);
 
       timelineEntries.push({
         snippetId: finishingVideo.snippets[0].id,
+        videoId: finishingVideo.id,
+        sourcePosition: 0,
         syncPointIndex: 0,
         startTime: 0,
         endTime: teaserEndTime,
@@ -62,36 +64,92 @@ export function Timeline() {
       if (startIndex === -1) startIndex = relevantSyncPoints.length;
     }
 
-    // Map each sync point to a video snippet
-    // Each cut lasts from one sync point to the next
-    for (let i = startIndex; i < relevantSyncPoints.length; i++) {
-      const currentPoint = relevantSyncPoints[i];
-      const nextPoint = relevantSyncPoints[i + 1];
+    // Count remaining sync points (excluding teaser)
+    const remainingSyncPoints = relevantSyncPoints.slice(startIndex);
+    const numSyncPoints = remainingSyncPoints.length;
 
-      // End time is either the next sync point or the output length
-      const endTime = nextPoint ? nextPoint.time : Math.min(outputLength, audioDuration);
+    if (numSyncPoints === 0 || sortedVideos.length === 0) {
+      return timelineEntries;
+    }
 
-      // Skip very short segments (< 100ms)
-      if (endTime - currentPoint.time < 0.1) continue;
+    // Calculate total duration of all videos
+    const totalVideoDuration = sortedVideos.reduce((sum, v) => sum + v.duration, 0);
 
-      // Assign snippets in order, cycling through them
-      const snippetIndex = (timelineEntries.length - (videoMode === 'teaser' ? 1 : 0)) % Math.max(1, allSnippets.length);
+    // Allocate sync points to each video proportionally based on duration
+    // Each video gets at least 1 sync point if there are enough sync points
+    const videoAllocations: { video: typeof sortedVideos[0]; syncPointCount: number }[] = [];
+    let allocatedCount = 0;
 
-      // Use actual snippet if available, otherwise create placeholder
-      const snippetId = allSnippets.length > 0
-        ? allSnippets[snippetIndex].id
-        : `placeholder-${snippetIndex}-${i}`;
+    for (let i = 0; i < sortedVideos.length; i++) {
+      const video = sortedVideos[i];
+      const proportion = video.duration / totalVideoDuration;
+      // For the last video, give it all remaining sync points to avoid rounding issues
+      const isLast = i === sortedVideos.length - 1;
+      const count = isLast
+        ? numSyncPoints - allocatedCount
+        : Math.max(1, Math.round(proportion * numSyncPoints));
 
-      timelineEntries.push({
-        snippetId,
-        syncPointIndex: i,
-        startTime: currentPoint.time,
-        endTime,
-      });
+      // Don't allocate more than remaining
+      const actualCount = Math.min(count, numSyncPoints - allocatedCount);
+      if (actualCount > 0) {
+        videoAllocations.push({ video, syncPointCount: actualCount });
+        allocatedCount += actualCount;
+      }
+    }
+
+    // Now create timeline entries: for each video's allocation, distribute clips across the video
+    let syncPointIdx = 0;
+    for (const allocation of videoAllocations) {
+      const { video, syncPointCount } = allocation;
+      const videoDuration = video.duration;
+
+      // Calculate distributed source positions within this video
+      // For N clips from a video of duration D, positions are at: 0, D/(N), 2*D/(N), ... (with safety margin at end)
+      const safetyMargin = 2; // Don't go within 2 seconds of video end
+      const usableDuration = Math.max(0, videoDuration - safetyMargin);
+
+      for (let clipIdx = 0; clipIdx < syncPointCount; clipIdx++) {
+        const actualSyncPointIndex = startIndex + syncPointIdx;
+        if (actualSyncPointIndex >= relevantSyncPoints.length) break;
+
+        const currentPoint = relevantSyncPoints[actualSyncPointIndex];
+        const nextPoint = relevantSyncPoints[actualSyncPointIndex + 1];
+
+        // End time is either the next sync point or the effective length
+        const endTime = nextPoint ? nextPoint.time : effectiveLength;
+
+        // Skip very short segments (< 100ms)
+        if (endTime - currentPoint.time < 0.1) {
+          syncPointIdx++;
+          clipIdx--; // Retry this allocation slot
+          continue;
+        }
+
+        // Calculate source position: distribute evenly across the video
+        const sourcePosition = syncPointCount > 1
+          ? (clipIdx / (syncPointCount - 1)) * usableDuration
+          : 0; // If only 1 clip, start at beginning
+
+        // Use first snippet ID for compatibility, or create placeholder
+        const snippetId = video.snippets.length > 0
+          ? video.snippets[0].id
+          : `placeholder-${video.id}-${clipIdx}`;
+
+        timelineEntries.push({
+          snippetId,
+          videoId: video.id,
+          sourcePosition,
+          syncPointIndex: actualSyncPointIndex,
+          startTime: currentPoint.time,
+          endTime,
+        });
+
+        syncPointIdx++;
+      }
     }
 
     return timelineEntries;
-  }, [videos, syncPoints, audioDuration, outputLength, videoMode, teaserDuration]);
+  }, [videos, syncPoints, audioDuration, effectiveLength, videoMode, teaserDuration]);
 
   useEffect(() => {
     setTimeline(generatedTimeline);
@@ -118,28 +176,40 @@ export function Timeline() {
         {/* Sync point markers */}
         <div className="absolute inset-0">
           {syncPoints
-            .filter(sp => sp.time < outputLength)
+            .filter(sp => sp.time < effectiveLength)
             .map((point, index) => (
               <div
                 key={`marker-${index}`}
                 className="absolute top-0 w-0.5 h-2"
                 style={{
-                  left: `${(point.time / outputLength) * 100}%`,
+                  left: `${(point.time / effectiveLength) * 100}%`,
                   backgroundColor: getSyncPointColor(point.type),
                 }}
               />
             ))}
         </div>
 
+        {/* Playhead indicator */}
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-primary-500 z-20 pointer-events-none"
+          style={{
+            left: `${(currentPlaybackTime / effectiveLength) * 100}%`,
+            boxShadow: isPreviewPlaying ? '0 0 8px rgba(249, 115, 22, 0.6)' : 'none',
+            transition: isPreviewPlaying ? 'none' : 'left 0.1s ease-out',
+          }}
+        >
+          {/* Playhead top marker */}
+          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-primary-500" />
+        </div>
+
         {/* Timeline entries */}
         <div className="absolute inset-x-0 top-3 bottom-0 flex">
           {timeline.map((entry, index) => {
-            const video = videos.find((v) =>
-              v.snippets.some((s) => s.id === entry.snippetId)
-            ) || videos[index % Math.max(1, videos.length)];
+            const video = videos.find((v) => v.id === entry.videoId)
+              || videos[index % Math.max(1, videos.length)];
 
-            const startPercent = (entry.startTime / outputLength) * 100;
-            const widthPercent = ((entry.endTime - entry.startTime) / outputLength) * 100;
+            const startPercent = (entry.startTime / effectiveLength) * 100;
+            const widthPercent = ((entry.endTime - entry.startTime) / effectiveLength) * 100;
 
             // Color based on segment label
             const colors: Record<string, string> = {
@@ -183,10 +253,11 @@ export function Timeline() {
       <div className="flex justify-between text-xs text-gray-500">
         <span>0:00</span>
         <span>
-          {timeline.length} cuts | {formatTime(outputLength)} output
+          {timeline.length} cuts | {formatTime(effectiveLength)} output
           {videoMode === 'teaser' && ' | Teaser mode'}
+          {audioDuration && audioDuration < outputLength && ` (audio: ${formatTime(audioDuration)})`}
         </span>
-        <span>{formatTime(outputLength)}</span>
+        <span>{formatTime(effectiveLength)}</span>
       </div>
 
       {/* Legend */}

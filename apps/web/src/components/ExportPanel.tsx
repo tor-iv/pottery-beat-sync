@@ -9,6 +9,7 @@ export function ExportPanel() {
     audio,
     timeline,
     outputLength,
+    audioDuration,
     isExporting,
     exportProgress,
     setExporting,
@@ -20,6 +21,9 @@ export function ExportPanel() {
     setExportAudioMode,
     selectedSongName,
   } = useProjectStore();
+
+  // Effective output length respects actual audio duration
+  const effectiveLength = audioDuration ? Math.min(outputLength, audioDuration) : outputLength;
   const [showModal, setShowModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,16 +48,16 @@ export function ExportPanel() {
         formData.append(`video_${index}_label`, video.label);
       });
 
-      // Add timeline and settings
+      // Add timeline and settings (use effective length that respects audio duration)
       formData.append('timeline', JSON.stringify(timeline));
-      formData.append('outputLength', outputLength.toString());
+      formData.append('outputLength', effectiveLength.toString());
       formData.append('videoMode', videoMode);
       formData.append('teaserDuration', teaserDuration.toString());
       formData.append('syncPoints', JSON.stringify(syncPoints));
       formData.append('exportAudioMode', exportAudioMode);
 
-      // Create EventSource for progress updates (use absolute URL for Safari compatibility)
-      const progressSource = new EventSource(new URL('/api/export/progress', window.location.origin).href);
+      // Create EventSource for progress updates
+      const progressSource = new EventSource('/api/export/progress');
       progressSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         setExportProgress(data.progress);
@@ -189,7 +193,12 @@ export function ExportPanel() {
                 <div className="bg-gray-700/50 rounded p-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Duration</span>
-                    <span className="text-white">{outputLength} seconds</span>
+                    <span className="text-white">
+                      {effectiveLength} seconds
+                      {audioDuration && audioDuration < outputLength && (
+                        <span className="text-gray-500 text-xs ml-1">(audio length)</span>
+                      )}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Cuts</span>

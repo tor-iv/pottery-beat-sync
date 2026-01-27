@@ -1,11 +1,26 @@
 'use client';
 
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 
 export function Preview() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { videos, audioUrl, timeline, beats, bpm, outputLength } = useProjectStore();
+  const playbackStartRef = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const {
+    videos,
+    audioUrl,
+    timeline,
+    beats,
+    bpm,
+    outputLength,
+    audioDuration,
+    setCurrentPlaybackTime,
+    setIsPreviewPlaying,
+  } = useProjectStore();
+
+  // Effective output length respects actual audio duration
+  const effectiveLength = audioDuration ? Math.min(outputLength, audioDuration) : outputLength;
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentClipIndex, setCurrentClipIndex] = useState(0);
@@ -32,12 +47,11 @@ export function Preview() {
   const currentVideoUrl = useMemo(() => {
     if (!hasContent || videos.length === 0) return null;
 
-    // Find which video this clip belongs to
+    // Find which video this clip belongs to using videoId from timeline entry
     const entry = timeline[currentClipIndex];
     if (!entry) return null;
 
-    // For now, cycle through videos based on clip index
-    const video = videos[currentClipIndex % videos.length];
+    const video = videos.find(v => v.id === entry.videoId);
     return video ? URL.createObjectURL(video.file) : null;
   }, [hasContent, videos, currentClipIndex, timeline]);
 
@@ -47,6 +61,63 @@ export function Preview() {
       if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
     };
   }, [currentVideoUrl]);
+
+  // Control video playback - play/pause the actual video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !currentVideoUrl) return;
+
+    if (isPlaying) {
+      video.play().catch(() => {
+        // Autoplay may be blocked by browser - user interaction required
+      });
+    } else {
+      video.pause();
+    }
+  }, [isPlaying, currentVideoUrl]);
+
+  // Seek to correct position when clip changes or when user seeks
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !hasContent) return;
+
+    const entry = timeline[currentClipIndex];
+    if (!entry) return;
+
+    // Calculate position within the current clip
+    let elapsedBefore = 0;
+    for (let i = 0; i < currentClipIndex; i++) {
+      elapsedBefore += timeline[i].endTime - timeline[i].startTime;
+    }
+    const positionInClip = currentTime - elapsedBefore;
+    const targetTime = entry.sourcePosition + positionInClip;
+
+    // Only seek if the difference is significant (avoid micro-seeks during playback)
+    if (Math.abs(video.currentTime - targetTime) > 0.1) {
+      video.currentTime = targetTime;
+    }
+  }, [currentClipIndex, timeline, hasContent]);
+
+  // Sync video position when seeking via slider (not during playback)
+  useEffect(() => {
+    if (isPlaying) return; // Don't interfere during playback
+
+    const video = videoRef.current;
+    if (!video || !hasContent) return;
+
+    const entry = timeline[currentClipIndex];
+    if (!entry) return;
+
+    // Calculate position within the current clip
+    let elapsedBefore = 0;
+    for (let i = 0; i < currentClipIndex; i++) {
+      elapsedBefore += timeline[i].endTime - timeline[i].startTime;
+    }
+    const positionInClip = currentTime - elapsedBefore;
+    const targetTime = entry.sourcePosition + positionInClip;
+
+    video.currentTime = targetTime;
+  }, [currentTime, isPlaying, currentClipIndex, timeline, hasContent]);
 
   const togglePlayPause = () => {
     setIsPlaying(!isPlaying);
@@ -62,23 +133,55 @@ export function Preview() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Simulate playback
+  // Sync playback state to store for Timeline playhead
   useEffect(() => {
-    if (!isPlaying) return;
+    setCurrentPlaybackTime(currentTime);
+  }, [currentTime, setCurrentPlaybackTime]);
 
-    const interval = setInterval(() => {
-      setCurrentTime((prev) => {
-        const next = prev + 0.1;
-        if (next >= outputLength) {
-          setIsPlaying(false);
-          return 0;
-        }
-        return next;
-      });
-    }, 100);
+  useEffect(() => {
+    setIsPreviewPlaying(isPlaying);
+  }, [isPlaying, setIsPreviewPlaying]);
 
-    return () => clearInterval(interval);
-  }, [isPlaying, outputLength]);
+  // Smooth playback using requestAnimationFrame (60fps)
+  useEffect(() => {
+    if (!isPlaying) {
+      playbackStartRef.current = null;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+
+    // Store the time when playback started, offset by current position
+    const startTimeOffset = currentTime;
+    playbackStartRef.current = performance.now();
+
+    const animate = (now: number) => {
+      if (playbackStartRef.current === null) return;
+
+      const elapsed = (now - playbackStartRef.current) / 1000; // Convert to seconds
+      const newTime = startTimeOffset + elapsed;
+
+      if (newTime >= effectiveLength) {
+        setIsPlaying(false);
+        setCurrentTime(0);
+        return;
+      }
+
+      setCurrentTime(newTime);
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [isPlaying, effectiveLength]);
 
   if (!hasContent) {
     return (
@@ -136,7 +239,7 @@ export function Preview() {
           <input
             type="range"
             min={0}
-            max={outputLength}
+            max={effectiveLength}
             step={0.1}
             value={currentTime}
             onChange={handleSeek}
@@ -145,7 +248,7 @@ export function Preview() {
         </div>
 
         <span className="text-sm text-gray-400 min-w-[80px] text-right">
-          {formatTime(currentTime)} / {formatTime(outputLength)}
+          {formatTime(currentTime)} / {formatTime(effectiveLength)}
         </span>
       </div>
 
