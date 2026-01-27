@@ -18,7 +18,6 @@ export function useProject() {
         videoNames: store.videos.map((v) => v.name),
         videoLabels: store.videos.map((v) => v.label),
         outputLength: store.outputLength,
-        cutsPerBeat: store.cutsPerBeat,
         snippetSelection: store.snippetSelection,
       };
 
@@ -33,7 +32,6 @@ export function useProject() {
     if (!project) throw new Error('Project not found');
 
     store.setOutputLength(project.outputLength);
-    store.setCutsPerBeat(project.cutsPerBeat);
     store.setSnippetSelection(project.snippetSelection);
     if (project.bpm) store.setBpm(project.bpm);
 
@@ -54,7 +52,6 @@ export function useProject() {
         name,
         createdAt: new Date(),
         outputLength: store.outputLength,
-        cutsPerBeat: store.cutsPerBeat,
         snippetSelection: store.snippetSelection,
         stageOrder: store.videos.map((v) => v.label),
       };
@@ -70,7 +67,6 @@ export function useProject() {
     if (!preset) throw new Error('Preset not found');
 
     store.setOutputLength(preset.outputLength);
-    store.setCutsPerBeat(preset.cutsPerBeat);
     store.setSnippetSelection(preset.snippetSelection);
 
     return preset;

@@ -10,7 +10,6 @@ export interface Project {
   videoNames: string[];
   videoLabels: string[];
   outputLength: number;
-  cutsPerBeat: string;
   snippetSelection: 'quality' | 'even' | 'random';
 }
 
@@ -19,7 +18,6 @@ export interface Preset {
   name: string;
   createdAt: Date;
   outputLength: number;
-  cutsPerBeat: string;
   snippetSelection: 'quality' | 'even' | 'random';
   stageOrder: string[];
 }

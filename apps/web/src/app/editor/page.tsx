@@ -90,8 +90,6 @@ function SettingsPanel() {
   const {
     outputLength,
     setOutputLength,
-    cutsPerBeat,
-    setCutsPerBeat,
     videoMode,
     setVideoMode,
     teaserDuration,
@@ -175,21 +173,6 @@ function SettingsPanel() {
         </select>
       </div>
 
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">
-          Cuts Per Beat
-        </label>
-        <select
-          value={cutsPerBeat}
-          onChange={(e) => setCutsPerBeat(e.target.value)}
-          className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
-        >
-          <option value="variable">Variable (recommended)</option>
-          <option value="1">Every beat</option>
-          <option value="2">Every 2 beats</option>
-          <option value="4">Every 4 beats</option>
-        </select>
-      </div>
 
       <div>
         <label className="block text-sm text-gray-400 mb-2">
