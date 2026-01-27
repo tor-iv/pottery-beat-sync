@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
-import { useBeatDetection } from '@/hooks/useBeatDetection';
+import { useAudioAnalysis } from '@/hooks/useAudioAnalysis';
 
 interface SpotifyTrack {
   id: string;
@@ -22,7 +22,7 @@ interface YouTubeResult {
 
 export function SongSearch() {
   const { setAudio, setAudioUrl, setSelectedSongName } = useProjectStore();
-  const { detectBeats } = useBeatDetection();
+  const { analyze } = useAudioAnalysis();
 
   const [spotifySession, setSpotifySession] = useState<string | null>(null);
   const [spotifyUser, setSpotifyUser] = useState<{ name: string; image?: string } | null>(null);
@@ -166,7 +166,7 @@ export function SongSearch() {
         setAudio(file);
         const url = URL.createObjectURL(file);
         setAudioUrl(url);
-        await detectBeats(file);
+        await analyze(file);
 
         setSelectedSong(title);
         setSelectedSongName(title); // Store for export reminder
@@ -178,7 +178,7 @@ export function SongSearch() {
         setDownloadingId(null);
       }
     },
-    [setAudio, setAudioUrl, detectBeats, setSelectedSongName]
+    [setAudio, setAudioUrl, analyze, setSelectedSongName]
   );
 
   const formatDuration = (ms: number) => {

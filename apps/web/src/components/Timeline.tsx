@@ -2,28 +2,32 @@
 
 import { useEffect, useMemo } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
+import { getSyncPointColor } from '@/lib/audio-analysis';
+import { sortVideosByStage } from '@/lib/pottery-stages';
 
 export function Timeline() {
-  const { videos, beats, outputLength, cutsPerBeat, bpm, timeline, setTimeline, videoMode, teaserDuration } =
-    useProjectStore();
+  const {
+    videos,
+    syncPoints,
+    audioDuration,
+    outputLength,
+    timeline,
+    setTimeline,
+    videoMode,
+    teaserDuration,
+  } = useProjectStore();
 
-  // Calculate timeline based on beats and settings
+  // Calculate timeline based on sync points
   const generatedTimeline = useMemo(() => {
-    if (!bpm || beats.length === 0 || videos.length === 0) {
+    if (syncPoints.length === 0 || videos.length === 0 || !audioDuration) {
       return [];
     }
 
-    const beatDuration = 60 / bpm;
-    const totalBeats = Math.floor(outputLength / beatDuration);
-    const beatsToUse = beats.slice(0, totalBeats);
+    // Filter sync points within output length
+    const relevantSyncPoints = syncPoints.filter(sp => sp.time < outputLength);
 
-    // Determine cut pattern based on cutsPerBeat setting
-    let cutPattern: number[];
-    if (cutsPerBeat === 'variable') {
-      // Variable: mix of 1, 2, and 4 beat cuts
-      cutPattern = [1, 2, 1, 4, 2, 1, 1, 2];
-    } else {
-      cutPattern = [parseInt(cutsPerBeat)];
+    if (relevantSyncPoints.length === 0) {
+      return [];
     }
 
     // Find finishing segment for teaser mode
@@ -31,67 +35,63 @@ export function Timeline() {
     const nonFinishingVideos = videos.filter((v) => v.label !== 'Finishing');
 
     // Collect all snippets from segments (excluding Finishing for teaser mode)
+    // Sort by pottery stage order so timeline progresses through the process
     const videosForTimeline = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videos;
-    const allSnippets = videosForTimeline.flatMap((v) =>
+    const sortedVideos = sortVideosByStage(videosForTimeline);
+    const allSnippets = sortedVideos.flatMap((v) =>
       v.snippets.map((s) => ({ ...s, segmentLabel: v.label }))
     );
 
     const timelineEntries: typeof timeline = [];
-    let beatIndex = 0;
 
     // In teaser mode, start with the finishing shot
-    if (videoMode === 'teaser' && finishingVideo) {
-      timelineEntries.push({
-        snippetId: `teaser-reveal-${finishingVideo.id}`,
-        beatIndex: 0,
-        duration: teaserDuration,
-      });
-      beatIndex = teaserDuration;
-    }
-
-    // If no snippets yet, create placeholder timeline
-    if (allSnippets.length === 0) {
-      let patternIndex = 0;
-      const videosToUse = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videos;
-
-      while (beatIndex < beatsToUse.length) {
-        const duration = cutPattern[patternIndex % cutPattern.length];
-        const videoIndex = (timelineEntries.length - (videoMode === 'teaser' ? 1 : 0)) % Math.max(1, videosToUse.length);
-
-        timelineEntries.push({
-          snippetId: `placeholder-${videoIndex}-${timelineEntries.length}`,
-          beatIndex,
-          duration,
-        });
-
-        beatIndex += duration;
-        patternIndex++;
-      }
-
-      return timelineEntries;
-    }
-
-    // Map snippets to beats
-    let snippetIndex = 0;
-    let patternIndex = 0;
-
-    while (beatIndex < beatsToUse.length && snippetIndex < allSnippets.length) {
-      const duration = cutPattern[patternIndex % cutPattern.length];
-      const snippet = allSnippets[snippetIndex % allSnippets.length];
+    let startIndex = 0;
+    if (videoMode === 'teaser' && finishingVideo && finishingVideo.snippets.length > 0) {
+      const firstSyncTime = relevantSyncPoints[0]?.time || 0;
+      const teaserEndTime = Math.min(teaserDuration, relevantSyncPoints[1]?.time || teaserDuration);
 
       timelineEntries.push({
-        snippetId: snippet.id,
-        beatIndex,
-        duration,
+        snippetId: finishingVideo.snippets[0].id,
+        syncPointIndex: 0,
+        startTime: 0,
+        endTime: teaserEndTime,
       });
 
-      beatIndex += duration;
-      snippetIndex++;
-      patternIndex++;
+      // Find the first sync point after teaserDuration
+      startIndex = relevantSyncPoints.findIndex(sp => sp.time >= teaserDuration);
+      if (startIndex === -1) startIndex = relevantSyncPoints.length;
+    }
+
+    // Map each sync point to a video snippet
+    // Each cut lasts from one sync point to the next
+    for (let i = startIndex; i < relevantSyncPoints.length; i++) {
+      const currentPoint = relevantSyncPoints[i];
+      const nextPoint = relevantSyncPoints[i + 1];
+
+      // End time is either the next sync point or the output length
+      const endTime = nextPoint ? nextPoint.time : Math.min(outputLength, audioDuration);
+
+      // Skip very short segments (< 100ms)
+      if (endTime - currentPoint.time < 0.1) continue;
+
+      // Assign snippets in order, cycling through them
+      const snippetIndex = (timelineEntries.length - (videoMode === 'teaser' ? 1 : 0)) % Math.max(1, allSnippets.length);
+
+      // Use actual snippet if available, otherwise create placeholder
+      const snippetId = allSnippets.length > 0
+        ? allSnippets[snippetIndex].id
+        : `placeholder-${snippetIndex}-${i}`;
+
+      timelineEntries.push({
+        snippetId,
+        syncPointIndex: i,
+        startTime: currentPoint.time,
+        endTime,
+      });
     }
 
     return timelineEntries;
-  }, [videos, beats, outputLength, cutsPerBeat, bpm, videoMode, teaserDuration]);
+  }, [videos, syncPoints, audioDuration, outputLength, videoMode, teaserDuration]);
 
   useEffect(() => {
     setTimeline(generatedTimeline);
@@ -103,7 +103,7 @@ export function Timeline() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (!bpm || beats.length === 0) {
+  if (syncPoints.length === 0) {
     return (
       <div className="text-gray-500 text-center py-8">
         Upload audio to generate timeline
@@ -111,31 +111,35 @@ export function Timeline() {
     );
   }
 
-  const beatDuration = 60 / bpm;
-
   return (
     <div className="space-y-4">
       {/* Timeline visualization */}
-      <div className="relative h-20 bg-gray-900/50 rounded overflow-hidden">
-        {/* Beat grid */}
-        <div className="absolute inset-0 flex">
-          {beats.slice(0, Math.floor(outputLength / beatDuration)).map((_, index) => (
-            <div
-              key={index}
-              className="flex-shrink-0 border-r border-gray-700/50"
-              style={{ width: `${(beatDuration / outputLength) * 100}%` }}
-            />
-          ))}
+      <div className="relative h-24 bg-gray-900/50 rounded overflow-hidden">
+        {/* Sync point markers */}
+        <div className="absolute inset-0">
+          {syncPoints
+            .filter(sp => sp.time < outputLength)
+            .map((point, index) => (
+              <div
+                key={`marker-${index}`}
+                className="absolute top-0 w-0.5 h-2"
+                style={{
+                  left: `${(point.time / outputLength) * 100}%`,
+                  backgroundColor: getSyncPointColor(point.type),
+                }}
+              />
+            ))}
         </div>
 
         {/* Timeline entries */}
-        <div className="absolute inset-0 flex">
+        <div className="absolute inset-x-0 top-3 bottom-0 flex">
           {timeline.map((entry, index) => {
             const video = videos.find((v) =>
               v.snippets.some((s) => s.id === entry.snippetId)
-            ) || videos[index % videos.length];
+            ) || videos[index % Math.max(1, videos.length)];
 
-            const widthPercent = (entry.duration * beatDuration / outputLength) * 100;
+            const startPercent = (entry.startTime / outputLength) * 100;
+            const widthPercent = ((entry.endTime - entry.startTime) / outputLength) * 100;
 
             // Color based on segment label
             const colors: Record<string, string> = {
@@ -148,12 +152,24 @@ export function Timeline() {
               Other: 'bg-gray-500',
             };
 
+            const syncPoint = syncPoints[entry.syncPointIndex];
+            const syncColor = syncPoint ? getSyncPointColor(syncPoint.type) : '#6b7280';
+
             return (
               <div
                 key={index}
-                className={`flex-shrink-0 h-full ${colors[video?.label || 'Other']} opacity-80 border-r border-gray-900 flex items-center justify-center overflow-hidden`}
-                style={{ width: `${widthPercent}%` }}
+                className={`absolute h-full ${colors[video?.label || 'Other']} opacity-80 border-r border-gray-900 flex flex-col items-center justify-center overflow-hidden`}
+                style={{
+                  left: `${startPercent}%`,
+                  width: `${widthPercent}%`,
+                }}
+                title={`${video?.label || 'Unknown'} | ${formatTime(entry.startTime)} - ${formatTime(entry.endTime)} | ${syncPoint?.type || 'cut'}`}
               >
+                {/* Sync point type indicator */}
+                <div
+                  className="w-2 h-2 rounded-full mb-1"
+                  style={{ backgroundColor: syncColor }}
+                />
                 <span className="text-[10px] text-white font-medium truncate px-1">
                   {video?.label?.slice(0, 3)}
                 </span>

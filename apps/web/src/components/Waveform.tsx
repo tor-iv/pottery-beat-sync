@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
+import { getSyncPointColor, getSyncPointSummary, type SyncPointType } from '@/lib/audio-analysis';
 
 export function Waveform() {
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<any>(null);
-  const { audioUrl, beats, bpm } = useProjectStore();
+  const { audioUrl, syncPoints, audioDuration } = useProjectStore();
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -66,20 +67,32 @@ export function Waveform() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Group sync points by type for legend
+  const syncPointCounts = syncPoints.reduce((acc, point) => {
+    acc[point.type] = (acc[point.type] || 0) + 1;
+    return acc;
+  }, {} as Record<SyncPointType, number>);
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {/* Waveform container */}
       <div className="relative">
         <div ref={containerRef} className="bg-gray-900/50 rounded" />
 
-        {/* Beat markers overlay */}
-        {isReady && beats.length > 0 && duration > 0 && (
+        {/* Sync point markers overlay */}
+        {isReady && syncPoints.length > 0 && duration > 0 && (
           <div className="absolute inset-0 pointer-events-none">
-            {beats.map((beat, index) => (
+            {syncPoints.map((point, index) => (
               <div
                 key={index}
-                className="absolute top-0 bottom-0 w-px bg-primary-500/40"
-                style={{ left: `${(beat.time / duration) * 100}%` }}
+                className="absolute top-0 bottom-0 transition-opacity"
+                style={{
+                  left: `${(point.time / duration) * 100}%`,
+                  width: point.type === 'drop' ? '3px' : '2px',
+                  backgroundColor: getSyncPointColor(point.type),
+                  opacity: 0.4 + point.intensity * 0.5,
+                }}
+                title={`${point.type} @ ${point.time.toFixed(2)}s (${Math.round(point.intensity * 100)}%)`}
               />
             ))}
           </div>
@@ -100,15 +113,29 @@ export function Waveform() {
           {formatTime(currentTime)} / {formatTime(duration)}
         </div>
 
-        {bpm && (
+        {syncPoints.length > 0 && (
           <div className="ml-auto text-sm">
-            <span className="text-primary-400 font-medium">{bpm} BPM</span>
-            <span className="text-gray-500 ml-2">
-              {beats.length} beats detected
-            </span>
+            <span className="text-primary-400 font-medium">{syncPoints.length} sync points</span>
           </div>
         )}
       </div>
+
+      {/* Sync point legend */}
+      {syncPoints.length > 0 && (
+        <div className="flex flex-wrap gap-3 text-xs">
+          {Object.entries(syncPointCounts).map(([type, count]) => (
+            <div key={type} className="flex items-center gap-1.5">
+              <div
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: getSyncPointColor(type as SyncPointType) }}
+              />
+              <span className="text-gray-400">
+                {count} {type}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

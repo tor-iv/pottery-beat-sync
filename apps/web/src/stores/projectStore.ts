@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { SyncPoint, SyncPointType } from '@/lib/audio-analysis';
 
 export interface VideoSegment {
   id: string;
@@ -18,35 +19,33 @@ export interface Snippet {
   qualityScore: number;
 }
 
-export interface Beat {
-  time: number;
-  strength: number;
-}
+// Re-export for convenience
+export type { SyncPoint, SyncPointType };
 
 export interface ProjectState {
   // Audio
   audio: File | null;
   audioUrl: string | null;
-  bpm: number | null;
-  beats: Beat[];
+  syncPoints: SyncPoint[];
+  audioDuration: number | null;
 
   // Videos
   videos: VideoSegment[];
 
   // Settings
   outputLength: number;
-  cutsPerBeat: string;
   snippetSelection: 'quality' | 'even' | 'random';
   videoMode: 'standard' | 'teaser';
-  teaserDuration: number; // Duration of the finished pot reveal at start (in beats)
+  teaserDuration: number; // Duration of the finished pot reveal at start (in seconds)
   exportAudioMode: 'include' | 'video-only'; // Whether to include audio in export
   selectedSongName: string | null; // For reminding user what song to add in TikTok
 
-  // Timeline
+  // Timeline - now based on sync points
   timeline: Array<{
     snippetId: string;
-    beatIndex: number;
-    duration: number;
+    syncPointIndex: number;
+    startTime: number;
+    endTime: number;
   }>;
 
   // Export
@@ -56,17 +55,16 @@ export interface ProjectState {
   // Actions
   setAudio: (file: File | null) => void;
   setAudioUrl: (url: string | null) => void;
-  setBpm: (bpm: number | null) => void;
-  setBeats: (beats: Beat[]) => void;
+  setSyncPoints: (syncPoints: SyncPoint[]) => void;
+  setAudioDuration: (duration: number | null) => void;
   addVideo: (video: VideoSegment) => void;
   removeVideo: (id: string) => void;
   updateVideo: (id: string, updates: Partial<VideoSegment>) => void;
   reorderVideos: (fromIndex: number, toIndex: number) => void;
   setOutputLength: (length: number) => void;
-  setCutsPerBeat: (value: string) => void;
   setSnippetSelection: (value: 'quality' | 'even' | 'random') => void;
   setVideoMode: (mode: 'standard' | 'teaser') => void;
-  setTeaserDuration: (beats: number) => void;
+  setTeaserDuration: (seconds: number) => void;
   setExportAudioMode: (mode: 'include' | 'video-only') => void;
   setSelectedSongName: (name: string | null) => void;
   setTimeline: (timeline: ProjectState['timeline']) => void;
@@ -78,14 +76,13 @@ export interface ProjectState {
 const initialState = {
   audio: null,
   audioUrl: null,
-  bpm: null,
-  beats: [],
+  syncPoints: [] as SyncPoint[],
+  audioDuration: null,
   videos: [],
   outputLength: 30,
-  cutsPerBeat: 'variable',
   snippetSelection: 'quality' as const,
   videoMode: 'standard' as const,
-  teaserDuration: 4, // 4 beats for the finished pot reveal
+  teaserDuration: 2, // 2 seconds for the finished pot reveal
   exportAudioMode: 'video-only' as const, // Default to video-only for TikTok workflow
   selectedSongName: null,
   timeline: [],
@@ -100,9 +97,9 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   setAudioUrl: (url) => set({ audioUrl: url }),
 
-  setBpm: (bpm) => set({ bpm }),
+  setSyncPoints: (syncPoints) => set({ syncPoints }),
 
-  setBeats: (beats) => set({ beats }),
+  setAudioDuration: (duration) => set({ audioDuration: duration }),
 
   addVideo: (video) =>
     set((state) => ({ videos: [...state.videos, video] })),
@@ -128,8 +125,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }),
 
   setOutputLength: (length) => set({ outputLength: length }),
-
-  setCutsPerBeat: (value) => set({ cutsPerBeat: value }),
 
   setSnippetSelection: (value) => set({ snippetSelection: value }),
 
