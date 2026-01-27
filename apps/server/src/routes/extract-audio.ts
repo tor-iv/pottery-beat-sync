@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
+import { trimAtSilence } from '../services/tiktok';
 
 const router = Router();
 
@@ -155,6 +156,7 @@ async function extractAudioFromFile(videoPath: string): Promise<string> {
 
 /**
  * Download TikTok video and extract audio using yt-dlp
+ * Automatically trims the TikTok ending watermark sound
  */
 async function downloadTikTokAudio(url: string): Promise<string> {
   const outputDir = path.join(process.cwd(), 'uploads');
@@ -164,7 +166,8 @@ async function downloadTikTokAudio(url: string): Promise<string> {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  return new Promise((resolve, reject) => {
+  // Step 1: Download audio with yt-dlp
+  const audioPath = await new Promise<string>((resolve, reject) => {
     const ytdlp = spawn('yt-dlp', [
       url,
       '--extract-audio',
@@ -209,6 +212,11 @@ async function downloadTikTokAudio(url: string): Promise<string> {
       reject(new Error(`yt-dlp error: ${err.message}`));
     });
   });
+
+  // Step 2: Trim TikTok ending watermark (silence detection)
+  await trimAtSilence(audioPath);
+
+  return audioPath;
 }
 
 export default router;
