@@ -151,7 +151,13 @@ async function downloadAudio(videoId: string): Promise<string> {
   const outputDir = path.join(process.cwd(), 'uploads');
   const outputTemplate = path.join(outputDir, `yt-${uuidv4()}.%(ext)s`);
 
+  // Ensure uploads directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
   return new Promise((resolve, reject) => {
+    // Use workarounds for YouTube's SABR streaming restrictions
     const ytdlp = spawn('yt-dlp', [
       `https://www.youtube.com/watch?v=${videoId}`,
       '--extract-audio',
@@ -159,6 +165,11 @@ async function downloadAudio(videoId: string): Promise<string> {
       '--audio-quality', '0',
       '-o', outputTemplate,
       '--no-playlist',
+      // Workarounds for SABR/403 errors
+      '--extractor-args', 'youtube:player_client=ios,web',
+      '--format', 'bestaudio[ext=m4a]/bestaudio/best',
+      '--no-check-certificates',
+      '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     ]);
 
     let stderr = '';
