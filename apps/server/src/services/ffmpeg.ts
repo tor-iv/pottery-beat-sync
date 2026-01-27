@@ -295,21 +295,70 @@ export async function exportVideo(options: ExportOptions): Promise<string> {
   const unsortedVideos = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videoDurations;
   const videosToUse = sortVideosByStage(unsortedVideos);
 
-  for (let i = timelineOffset; i < timeline.length; i++) {
-    const entry = timeline[i];
-    const videoIndex = (i - timelineOffset) % Math.max(1, videosToUse.length);
-    const video = videosToUse[videoIndex] || videoDurations[0];
+  // Calculate total duration and allocate clips proportionally to each video's duration
+  const totalDuration = videosToUse.reduce((sum, v) => sum + v.duration, 0);
+  const remainingClips = timeline.length - timelineOffset;
+
+  // Calculate clips per video proportional to duration
+  const videoClipCounts: number[] = [];
+  let allocatedClips = 0;
+
+  for (let i = 0; i < videosToUse.length; i++) {
+    const video = videosToUse[i];
+    if (i === videosToUse.length - 1) {
+      // Last video gets remaining clips to ensure total matches
+      videoClipCounts.push(remainingClips - allocatedClips);
+    } else {
+      const proportion = video.duration / totalDuration;
+      const clipCount = Math.round(remainingClips * proportion);
+      videoClipCounts.push(clipCount);
+      allocatedClips += clipCount;
+    }
+  }
+
+  // Build clip plan: for each video, extract clips evenly distributed across its duration
+  interface ClipPlan {
+    video: typeof videoDurations[0];
+    position: number;
+    timelineIndex: number;
+  }
+  const clipPlans: ClipPlan[] = [];
+
+  let clipIndex = timelineOffset;
+  for (let videoIdx = 0; videoIdx < videosToUse.length; videoIdx++) {
+    const video = videosToUse[videoIdx];
+    const clipsForThisVideo = videoClipCounts[videoIdx];
+
+    for (let clipInVideo = 0; clipInVideo < clipsForThisVideo; clipInVideo++) {
+      // Get clip duration from timeline
+      const entry = timeline[clipIndex];
+      const clipDuration = entry.duration * beatDuration;
+
+      // Evenly distribute clip positions across the video duration
+      const usableDuration = Math.max(0, video.duration - clipDuration);
+      const position = clipsForThisVideo > 1
+        ? (clipInVideo / (clipsForThisVideo - 1)) * usableDuration
+        : usableDuration / 2; // Center single clip
+
+      clipPlans.push({
+        video,
+        position: Math.max(0, Math.min(position, usableDuration)),
+        timelineIndex: clipIndex,
+      });
+
+      clipIndex++;
+    }
+  }
+
+  // Extract clips according to the plan
+  for (const plan of clipPlans) {
+    const entry = timeline[plan.timelineIndex];
     const clipDuration = entry.duration * beatDuration;
-
-    // Calculate snippet position (evenly distributed across source video)
-    const snippetPosition = ((i - timelineOffset) / Math.max(1, timeline.length - timelineOffset)) * (video.duration - clipDuration);
-    const safePosition = Math.max(0, Math.min(snippetPosition, video.duration - clipDuration));
-
-    const clipPath = path.join(tempDir, `clip-${i}.mp4`);
+    const clipPath = path.join(tempDir, `clip-${plan.timelineIndex}.mp4`);
 
     await extractClip(
-      video.path,
-      safePosition,
+      plan.video.path,
+      plan.position,
       clipDuration,
       clipPath,
       width,
@@ -320,7 +369,7 @@ export async function exportVideo(options: ExportOptions): Promise<string> {
     processedClips++;
 
     const progress = 10 + (processedClips / timeline.length) * 50;
-    onProgress?.(progress, 'extracting', `Extracting clip ${processedClips}/${timeline.length}`);
+    onProgress?.(progress, 'extracting', `Extracting clip ${processedClips}/${timeline.length} (${plan.video.label})`);
   }
 
   onProgress?.(60, 'encoding', 'Concatenating clips...');
