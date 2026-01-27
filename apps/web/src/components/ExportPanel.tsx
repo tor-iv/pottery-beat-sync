@@ -15,7 +15,7 @@ export function ExportPanel() {
     setExportProgress,
     videoMode,
     teaserDuration,
-    bpm,
+    syncPoints,
     exportAudioMode,
     setExportAudioMode,
     selectedSongName,
@@ -49,11 +49,11 @@ export function ExportPanel() {
       formData.append('outputLength', outputLength.toString());
       formData.append('videoMode', videoMode);
       formData.append('teaserDuration', teaserDuration.toString());
-      formData.append('bpm', (bpm || 120).toString());
+      formData.append('syncPoints', JSON.stringify(syncPoints));
       formData.append('exportAudioMode', exportAudioMode);
 
-      // Create EventSource for progress updates
-      const progressSource = new EventSource('/api/export/progress');
+      // Create EventSource for progress updates (use absolute URL for Safari compatibility)
+      const progressSource = new EventSource(new URL('/api/export/progress', window.location.origin).href);
       progressSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         setExportProgress(data.progress);
