@@ -3,6 +3,26 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 
+// Pottery stage order for consistent timeline progression
+const POTTERY_STAGE_ORDER = [
+  'Centering',
+  'Coning',
+  'Opening',
+  'Pulling',
+  'Shaping',
+  'Finishing',
+  'Other',
+] as const;
+
+function getStageIndex(label: string): number {
+  const index = POTTERY_STAGE_ORDER.indexOf(label as (typeof POTTERY_STAGE_ORDER)[number]);
+  return index === -1 ? POTTERY_STAGE_ORDER.length : index;
+}
+
+function sortVideosByStage<T extends { label: string }>(videos: T[]): T[] {
+  return [...videos].sort((a, b) => getStageIndex(a.label) - getStageIndex(b.label));
+}
+
 export interface ExportOptions {
   audioPath: string;
   videos: Array<{ path: string; label: string }>;
@@ -271,7 +291,9 @@ export async function exportVideo(options: ExportOptions): Promise<string> {
   }
 
   // Process the rest of the timeline
-  const videosToUse = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videoDurations;
+  // Sort videos by pottery stage order so export matches timeline progression
+  const unsortedVideos = videoMode === 'teaser' && finishingVideo ? nonFinishingVideos : videoDurations;
+  const videosToUse = sortVideosByStage(unsortedVideos);
 
   for (let i = timelineOffset; i < timeline.length; i++) {
     const entry = timeline[i];

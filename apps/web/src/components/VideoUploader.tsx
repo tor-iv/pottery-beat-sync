@@ -2,16 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { useProjectStore, VideoSegment } from '@/stores/projectStore';
-
-const SEGMENT_LABELS = [
-  'Centering',
-  'Coning',
-  'Opening',
-  'Pulling',
-  'Shaping',
-  'Finishing',
-  'Other',
-];
+import { POTTERY_STAGE_ORDER } from '@/lib/pottery-stages';
 
 export function VideoUploader() {
   const { videos, addVideo, removeVideo, updateVideo, reorderVideos } =
@@ -163,7 +154,7 @@ export function VideoUploader() {
                 }
                 className="w-full bg-gray-600 border-none rounded text-xs text-white py-1 px-1"
               >
-                {SEGMENT_LABELS.map((label) => (
+                {POTTERY_STAGE_ORDER.map((label) => (
                   <option key={label} value={label}>
                     {label}
                   </option>
