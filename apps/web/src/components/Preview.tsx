@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 
 export function Preview() {
@@ -15,21 +15,21 @@ export function Preview() {
 
   // Update current clip based on playback time
   useEffect(() => {
-    if (!hasContent || !bpm) return;
+    if (!hasContent) return;
 
     let elapsed = 0;
     for (let i = 0; i < timeline.length; i++) {
-      const clipDuration = timeline[i].duration * beatDuration;
+      const clipDuration = timeline[i].endTime - timeline[i].startTime;
       if (currentTime < elapsed + clipDuration) {
         setCurrentClipIndex(i);
         break;
       }
       elapsed += clipDuration;
     }
-  }, [currentTime, timeline, beatDuration, hasContent, bpm]);
+  }, [currentTime, timeline, hasContent]);
 
-  // Get current video source
-  const getCurrentVideoUrl = () => {
+  // Get current video source - memoized to prevent creating new blob URLs on every render
+  const currentVideoUrl = useMemo(() => {
     if (!hasContent || videos.length === 0) return null;
 
     // Find which video this clip belongs to
@@ -39,7 +39,14 @@ export function Preview() {
     // For now, cycle through videos based on clip index
     const video = videos[currentClipIndex % videos.length];
     return video ? URL.createObjectURL(video.file) : null;
-  };
+  }, [hasContent, videos, currentClipIndex, timeline]);
+
+  // Cleanup blob URL when it changes
+  useEffect(() => {
+    return () => {
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+    };
+  }, [currentVideoUrl]);
 
   const togglePlayPause = () => {
     setIsPlaying(!isPlaying);
@@ -83,8 +90,6 @@ export function Preview() {
       </div>
     );
   }
-
-  const currentVideoUrl = getCurrentVideoUrl();
 
   return (
     <div className="space-y-3">
