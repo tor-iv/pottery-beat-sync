@@ -18,6 +18,51 @@ export interface AudioAnalysis {
   averageEnergy: number;
 }
 
+// Music type presets for different genres
+export type MusicType = 'chill' | 'standard' | 'beat-heavy';
+
+export interface AnalysisSettings {
+  musicType: MusicType;
+}
+
+export interface AnalysisPreset {
+  densityMin: number;      // Min sync points per second
+  densityMax: number;      // Max sync points per second
+  energyThreshold: number; // Percentile for energy peaks (0-1)
+  onsetDedup: number;      // Milliseconds - dedup window for onsets
+  energyDedup: number;     // Milliseconds - dedup window for energy peaks
+  maxGap: number;          // Seconds - maximum gap between sync points
+}
+
+export const ANALYSIS_PRESETS: Record<MusicType, AnalysisPreset> = {
+  chill: {
+    densityMin: 0.8,
+    densityMax: 1.5,
+    energyThreshold: 0.75,
+    onsetDedup: 80,
+    energyDedup: 300,
+    maxGap: 3.0,
+  },
+  standard: {
+    densityMin: 1.5,
+    densityMax: 2.5,
+    energyThreshold: 0.7,
+    onsetDedup: 50,
+    energyDedup: 200,
+    maxGap: 2.0,
+  },
+  'beat-heavy': {
+    densityMin: 2.5,
+    densityMax: 4.0,
+    energyThreshold: 0.5,
+    onsetDedup: 30,
+    energyDedup: 100,
+    maxGap: 1.0,
+  },
+};
+
+const DEFAULT_SETTINGS: AnalysisSettings = { musicType: 'standard' };
+
 let essentiaInstance: any = null;
 let EssentiaWASM: any = null;
 
@@ -44,20 +89,24 @@ async function initEssentia() {
 /**
  * Analyze audio buffer for meaningful sync points
  */
-export async function analyzeAudio(audioBuffer: AudioBuffer): Promise<AudioAnalysis> {
+export async function analyzeAudio(
+  audioBuffer: AudioBuffer,
+  settings: AnalysisSettings = DEFAULT_SETTINGS
+): Promise<AudioAnalysis> {
   const essentia = await initEssentia();
+  const preset = ANALYSIS_PRESETS[settings.musicType];
 
   if (essentia) {
-    return analyzeWithEssentia(audioBuffer, essentia);
+    return analyzeWithEssentia(audioBuffer, essentia, preset);
   } else {
-    return analyzeBasic(audioBuffer);
+    return analyzeBasic(audioBuffer, preset);
   }
 }
 
 /**
  * Advanced analysis using Essentia.js
  */
-async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Promise<AudioAnalysis> {
+async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any, preset: AnalysisPreset): Promise<AudioAnalysis> {
   const sampleRate = audioBuffer.sampleRate;
   const channelData = audioBuffer.getChannelData(0);
   const duration = audioBuffer.duration;
@@ -68,6 +117,77 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
   const syncPoints: SyncPoint[] = [];
   let bpm: number | null = null;
 
+  // Pre-compute energy data for beat classification
+  let frameEnergies: number[] = [];
+  let lowFreqEnergies: number[] = [];
+  let highFreqEnergies: number[] = [];
+  const analysisHopSize = 512;
+  const analysisFrameSize = 2048;
+
+  try {
+    // Pre-compute spectral energy bands for beat classification
+    const frames = essentia.FrameGenerator(signal, analysisFrameSize, analysisHopSize);
+    for (const frame of frames) {
+      const energy = essentia.Energy(frame);
+      frameEnergies.push(energy.energy);
+
+      try {
+        const spectrum = essentia.Spectrum(frame);
+        const specArray: number[] = essentia.vectorToArray(spectrum.spectrum);
+        const binCount = specArray.length;
+
+        // Low frequency (bass): 0-250Hz roughly first 10% of bins
+        const lowBins = Math.floor(binCount * 0.1);
+        const lowEnergy = specArray.slice(0, lowBins).reduce((a, b) => a + b * b, 0);
+        lowFreqEnergies.push(lowEnergy);
+
+        // High frequency (snare/hi-hat): 2000Hz+ roughly 40-80% of bins
+        const highStart = Math.floor(binCount * 0.4);
+        const highEnd = Math.floor(binCount * 0.8);
+        const highEnergy = specArray.slice(highStart, highEnd).reduce((a, b) => a + b * b, 0);
+        highFreqEnergies.push(highEnergy);
+      } catch {
+        lowFreqEnergies.push(0);
+        highFreqEnergies.push(0);
+      }
+    }
+  } catch (e) {
+    console.warn('Spectral pre-analysis failed:', e);
+  }
+
+  // Helper to get spectral characteristics at a given time
+  const getSpectralType = (time: number): { type: SyncPointType; intensity: number } => {
+    const frameIndex = Math.floor((time * sampleRate) / analysisHopSize);
+    if (frameIndex < 0 || frameIndex >= lowFreqEnergies.length) {
+      return { type: 'hit', intensity: 0.5 };
+    }
+
+    const lowE = lowFreqEnergies[frameIndex];
+    const highE = highFreqEnergies[frameIndex];
+    const totalE = frameEnergies[frameIndex];
+
+    // Calculate relative contributions
+    const maxLow = Math.max(...lowFreqEnergies) || 1;
+    const maxHigh = Math.max(...highFreqEnergies) || 1;
+
+    const lowRatio = lowE / maxLow;
+    const highRatio = highE / maxHigh;
+
+    // Classify based on spectral content
+    if (lowRatio > 0.7 && lowRatio > highRatio * 1.5) {
+      // Strong bass presence
+      return { type: lowRatio > 0.85 ? 'drop' : 'bass', intensity: Math.min(1, lowRatio + 0.2) };
+    } else if (highRatio > 0.6 && highRatio > lowRatio * 1.2) {
+      // Strong high frequency - likely snare or hi-hat
+      return { type: 'snare', intensity: Math.min(1, highRatio + 0.1) };
+    } else if (lowRatio > 0.5 && highRatio > 0.4) {
+      // Both present - full hit
+      return { type: 'hit', intensity: Math.min(1, (lowRatio + highRatio) / 2 + 0.2) };
+    }
+
+    return { type: 'hit', intensity: 0.5 };
+  };
+
   try {
     // 1. Beat tracking with RhythmExtractor
     const rhythmResult = essentia.RhythmExtractor2013(signal);
@@ -76,22 +196,21 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
     // Get beat positions (these are actual detected beats, not uniform)
     const beatPositions: number[] = essentia.vectorToArray(rhythmResult.ticks);
 
-    // Add beats as sync points with varying intensity based on strength
+    // Add beats as sync points with classification based on spectral content
     for (let i = 0; i < beatPositions.length; i++) {
       const time = beatPositions[i];
       if (time < duration) {
-        // Every 4th beat is stronger (downbeat)
-        const isDownbeat = i % 4 === 0;
-        syncPoints.push({
-          time,
-          type: isDownbeat ? 'drop' : 'hit',
-          intensity: isDownbeat ? 0.9 : 0.5,
-        });
+        // Classify beat based on actual spectral content instead of naive i % 4
+        const { type, intensity } = getSpectralType(time);
+        syncPoints.push({ time, type, intensity });
       }
     }
   } catch (e) {
     console.warn('Beat tracking failed:', e);
   }
+
+  // Onset dedup window in seconds
+  const onsetDedupSec = preset.onsetDedup / 1000;
 
   try {
     // 2. Onset detection (transients - drum hits, note starts)
@@ -102,17 +221,17 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
     const hopSize = 512;
     for (const frame of onsetTimes) {
       const time = (frame * hopSize) / sampleRate;
-      if (time < duration && !syncPoints.some(p => Math.abs(p.time - time) < 0.05)) {
-        syncPoints.push({
-          time,
-          type: 'hit',
-          intensity: 0.7,
-        });
+      if (time < duration && !syncPoints.some(p => Math.abs(p.time - time) < onsetDedupSec)) {
+        const { type, intensity } = getSpectralType(time);
+        syncPoints.push({ time, type, intensity });
       }
     }
   } catch (e) {
     console.warn('Onset detection failed:', e);
   }
+
+  // Energy dedup window in seconds
+  const energyDedupSec = preset.energyDedup / 1000;
 
   try {
     // 3. Energy analysis for drops, builds, and segment detection
@@ -123,7 +242,7 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
     const energies: number[] = [];
     const spectralCentroids: number[] = [];
 
-    for (let frame of frames) {
+    for (const frame of frames) {
       const energy = essentia.Energy(frame);
       energies.push(energy.energy);
 
@@ -137,10 +256,13 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
       }
     }
 
-    // Find energy peaks (potential drops)
+    // Find energy peaks using preset threshold
+    const sortedEnergies = [...energies].sort((a, b) => a - b);
+    const thresholdIndex = Math.floor(sortedEnergies.length * preset.energyThreshold);
+    const threshold = sortedEnergies[thresholdIndex] || sortedEnergies[sortedEnergies.length - 1];
+
     const maxEnergy = Math.max(...energies);
     const meanEnergy = energies.reduce((a, b) => a + b, 0) / energies.length;
-    const threshold = meanEnergy + (maxEnergy - meanEnergy) * 0.7;
 
     for (let i = 2; i < energies.length - 2; i++) {
       const energy = energies[i];
@@ -153,12 +275,14 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
         energy > energies[i - 2] &&
         energy > energies[i + 1] &&
         energy > energies[i + 2] &&
-        !syncPoints.some(p => Math.abs(p.time - time) < 0.2)
+        !syncPoints.some(p => Math.abs(p.time - time) < energyDedupSec)
       ) {
         const intensity = Math.min(1, (energy - meanEnergy) / (maxEnergy - meanEnergy));
+        const { type: spectralType } = getSpectralType(time);
+        // Use spectral classification but boost intensity for high energy
         syncPoints.push({
           time,
-          type: intensity > 0.85 ? 'drop' : 'bass',
+          type: intensity > 0.85 ? 'drop' : spectralType,
           intensity,
         });
       }
@@ -166,20 +290,15 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
 
     // 4. Segment detection (verse/chorus) using energy + spectral changes
     const segmentWindowSize = Math.floor(4 * sampleRate / hopSize); // ~4 second windows
-    const segments: Array<{ start: number; end: number; type: 'verse' | 'chorus' }> = [];
 
     if (energies.length > segmentWindowSize * 2) {
       const windowEnergies: number[] = [];
-      const windowCentroids: number[] = [];
 
-      // Calculate average energy and centroid for each window
+      // Calculate average energy for each window
       for (let i = 0; i < energies.length - segmentWindowSize; i += segmentWindowSize / 2) {
         const windowEnd = Math.min(i + segmentWindowSize, energies.length);
         const windowE = energies.slice(i, windowEnd);
-        const windowC = spectralCentroids.slice(i, windowEnd);
-
         windowEnergies.push(windowE.reduce((a, b) => a + b, 0) / windowE.length);
-        windowCentroids.push(windowC.reduce((a, b) => a + b, 0) / windowC.length);
       }
 
       // Classify segments based on energy (chorus = higher energy, verse = lower)
@@ -264,7 +383,7 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
 
   // Sort and filter sync points
   syncPoints.sort((a, b) => a.time - b.time);
-  const filteredPoints = filterSyncPoints(syncPoints, duration);
+  const filteredPoints = filterSyncPoints(syncPoints, duration, preset);
 
   return {
     syncPoints: filteredPoints,
@@ -277,7 +396,7 @@ async function analyzeWithEssentia(audioBuffer: AudioBuffer, essentia: any): Pro
 /**
  * Basic analysis fallback (no Essentia)
  */
-async function analyzeBasic(audioBuffer: AudioBuffer): Promise<AudioAnalysis> {
+async function analyzeBasic(audioBuffer: AudioBuffer, preset: AnalysisPreset): Promise<AudioAnalysis> {
   const sampleRate = audioBuffer.sampleRate;
   const channelData = audioBuffer.getChannelData(0);
   const duration = audioBuffer.duration;
@@ -303,12 +422,17 @@ async function analyzeBasic(audioBuffer: AudioBuffer): Promise<AudioAnalysis> {
     energies.push(Math.sqrt(sum / frameSize));
   }
 
+  // Use preset energy threshold
+  const sortedEnergies = [...energies].sort((a, b) => a - b);
+  const thresholdIndex = Math.floor(sortedEnergies.length * preset.energyThreshold);
+  const threshold = sortedEnergies[thresholdIndex] || sortedEnergies[sortedEnergies.length - 1];
+
   const maxEnergy = Math.max(...energies);
   const meanEnergy = energies.reduce((a, b) => a + b, 0) / energies.length;
-  const threshold = meanEnergy + (maxEnergy - meanEnergy) * 0.5;
 
-  // Detect peaks
-  const minDistance = Math.floor(0.15 * sampleRate / hopSize);
+  // Detect peaks using preset dedup window
+  const minDistanceSec = preset.energyDedup / 1000;
+  const minDistance = Math.floor(minDistanceSec * sampleRate / hopSize);
   let lastPeakIndex = -minDistance;
 
   for (let i = 3; i < energies.length - 3; i++) {
@@ -361,7 +485,7 @@ async function analyzeBasic(audioBuffer: AudioBuffer): Promise<AudioAnalysis> {
 
   // Sort and filter
   syncPoints.sort((a, b) => a.time - b.time);
-  const filteredPoints = filterSyncPoints(syncPoints, duration);
+  const filteredPoints = filterSyncPoints(syncPoints, duration, preset);
 
   return {
     syncPoints: filteredPoints,
@@ -374,10 +498,11 @@ async function analyzeBasic(audioBuffer: AudioBuffer): Promise<AudioAnalysis> {
 /**
  * Filter sync points to keep the most meaningful ones
  */
-function filterSyncPoints(points: SyncPoint[], duration: number): SyncPoint[] {
-  // Merge nearby points
+function filterSyncPoints(points: SyncPoint[], duration: number, preset: AnalysisPreset): SyncPoint[] {
+  // Merge nearby points using preset-specific minimum gap
+  // Use the smaller of onset/energy dedup for general merging
   const merged: SyncPoint[] = [];
-  const minGap = 0.08;
+  const minGap = preset.onsetDedup / 1000; // Convert ms to seconds
 
   for (const point of points) {
     const existing = merged.find(p => Math.abs(p.time - point.time) < minGap);
@@ -392,18 +517,21 @@ function filterSyncPoints(points: SyncPoint[], duration: number): SyncPoint[] {
     }
   }
 
-  // Target density: ~1-2 points per second
+  // Target density based on preset (use midpoint of range)
+  const targetDensity = (preset.densityMin + preset.densityMax) / 2;
   const targetCount = Math.min(
-    Math.max(20, Math.floor(duration * 1.5)),
-    Math.floor(duration * 2.5)
+    Math.max(20, Math.floor(duration * preset.densityMin)),
+    Math.floor(duration * preset.densityMax)
   );
 
   // Always keep drops, resumes, and high-intensity points
+  // Lower the intensity threshold for beat-heavy to keep more points
+  const intensityThreshold = preset.energyThreshold > 0.6 ? 0.85 : 0.75;
   const mustKeep = merged.filter(
-    p => p.type === 'drop' || p.type === 'resume' || p.intensity > 0.85
+    p => p.type === 'drop' || p.type === 'resume' || p.intensity > intensityThreshold
   );
   const others = merged.filter(
-    p => p.type !== 'drop' && p.type !== 'resume' && p.intensity <= 0.85
+    p => p.type !== 'drop' && p.type !== 'resume' && p.intensity <= intensityThreshold
   );
 
   // Sort others by intensity
@@ -415,48 +543,63 @@ function filterSyncPoints(points: SyncPoint[], duration: number): SyncPoint[] {
   // Sort by time
   selected.sort((a, b) => a.time - b.time);
 
-  // Ensure distribution (no huge gaps)
-  return ensureDistribution(selected, duration);
+  // Ensure distribution (no huge gaps) using preset max gap
+  return ensureDistribution(selected, duration, preset);
 }
 
 /**
  * Ensure sync points are reasonably distributed
  */
-function ensureDistribution(points: SyncPoint[], duration: number): SyncPoint[] {
+function ensureDistribution(points: SyncPoint[], duration: number, preset: AnalysisPreset): SyncPoint[] {
+  const maxGap = preset.maxGap;
+
   if (points.length < 2) {
     // Add some basic points if we have almost none
+    // Use preset density to determine spacing
+    const spacing = 1 / ((preset.densityMin + preset.densityMax) / 2);
     const result: SyncPoint[] = [];
-    for (let t = 0; t < duration; t += 2) {
+    for (let t = 0; t < duration; t += spacing) {
       result.push({ time: t, type: 'hit', intensity: 0.5 });
     }
     return result;
   }
 
   const result: SyncPoint[] = [points[0]];
-  const maxGap = 2.5; // Max 2.5 seconds between points
 
   for (let i = 1; i < points.length; i++) {
     const gap = points[i].time - result[result.length - 1].time;
 
     if (gap > maxGap) {
-      // Insert filler point
-      result.push({
-        time: result[result.length - 1].time + gap / 2,
-        type: 'hit',
-        intensity: 0.4,
-      });
+      // Insert filler points to bridge the gap
+      // For beat-heavy, we may need multiple fillers
+      const numFillers = Math.ceil(gap / maxGap) - 1;
+      const fillerSpacing = gap / (numFillers + 1);
+
+      for (let f = 1; f <= numFillers; f++) {
+        result.push({
+          time: result[result.length - 1].time + fillerSpacing,
+          type: 'hit',
+          intensity: 0.4,
+        });
+      }
     }
 
     result.push(points[i]);
   }
 
   // Check end gap
-  if (duration - result[result.length - 1].time > maxGap) {
-    result.push({
-      time: result[result.length - 1].time + (duration - result[result.length - 1].time) / 2,
-      type: 'hit',
-      intensity: 0.3,
-    });
+  const endGap = duration - result[result.length - 1].time;
+  if (endGap > maxGap) {
+    const numFillers = Math.ceil(endGap / maxGap) - 1;
+    const fillerSpacing = endGap / (numFillers + 1);
+
+    for (let f = 1; f <= numFillers; f++) {
+      result.push({
+        time: result[result.length - 1].time + fillerSpacing,
+        type: 'hit',
+        intensity: 0.3,
+      });
+    }
   }
 
   return result;

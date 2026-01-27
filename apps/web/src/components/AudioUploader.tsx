@@ -4,10 +4,20 @@ import { useCallback, useState } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import { useAudioAnalysis } from '@/hooks/useAudioAnalysis';
 import { SongSearch } from './SongSearch';
+import type { MusicType } from '@/lib/audio-analysis';
+
+const MUSIC_TYPE_LABELS: Record<MusicType, { label: string; description: string }> = {
+  'chill': { label: 'Chill', description: 'Fewer cuts, relaxed vibe' },
+  'standard': { label: 'Standard', description: 'Balanced detection' },
+  'beat-heavy': { label: 'Beat Heavy', description: 'More cuts, high energy' },
+};
 
 export function AudioUploader() {
-  const { audio, setAudio, setAudioUrl, syncPoints, setSyncPoints, setAudioDuration, setSelectedSongName } = useProjectStore();
-  const { analyze, isAnalyzing, error: analysisError, summary } = useAudioAnalysis();
+  const {
+    audio, setAudio, setAudioUrl, syncPoints, setSyncPoints, setAudioDuration,
+    setSelectedSongName, analysisSettings, setAnalysisSettings
+  } = useProjectStore();
+  const { analyze, reanalyze, isAnalyzing, error: analysisError, summary } = useAudioAnalysis();
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'extract' | 'search' | 'upload'>('extract');
   const [isExtracting, setIsExtracting] = useState(false);
@@ -147,6 +157,13 @@ export function AudioUploader() {
     setAudioDuration(null);
   };
 
+  // Handle music type change and re-analyze
+  const handleMusicTypeChange = async (musicType: MusicType) => {
+    const newSettings = { musicType };
+    setAnalysisSettings(newSettings);
+    await reanalyze(newSettings);
+  };
+
   if (audio) {
     return (
       <div className="space-y-3">
@@ -170,8 +187,37 @@ export function AudioUploader() {
           </button>
         </div>
 
+        {/* Music Type Selector */}
+        <div className="bg-gray-800/50 rounded-lg p-3">
+          <p className="text-gray-400 text-xs mb-2">Detection Sensitivity</p>
+          <div className="flex gap-2">
+            {(Object.keys(MUSIC_TYPE_LABELS) as MusicType[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => handleMusicTypeChange(type)}
+                disabled={isAnalyzing}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  analysisSettings.musicType === type
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                } ${isAnalyzing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={MUSIC_TYPE_LABELS[type].description}
+              >
+                {MUSIC_TYPE_LABELS[type].label}
+              </button>
+            ))}
+          </div>
+          <p className="text-gray-500 text-xs mt-2">
+            {MUSIC_TYPE_LABELS[analysisSettings.musicType].description}
+          </p>
+        </div>
+
         {/* Analysis summary */}
-        {summary && (
+        {isAnalyzing ? (
+          <div className="bg-gray-800/50 rounded-lg p-3 text-sm">
+            <p className="text-primary-400">Re-analyzing audio...</p>
+          </div>
+        ) : summary && (
           <div className="bg-gray-800/50 rounded-lg p-3 text-sm">
             <p className="text-gray-300">
               <span className="text-primary-400 font-medium">{syncPoints.length}</span> sync points detected

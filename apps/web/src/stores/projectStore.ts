@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SyncPoint, SyncPointType } from '@/lib/audio-analysis';
+import type { SyncPoint, SyncPointType, AnalysisSettings, MusicType } from '@/lib/audio-analysis';
 
 export interface VideoSegment {
   id: string;
@@ -25,7 +25,7 @@ export interface Beat {
 }
 
 // Re-export for convenience
-export type { SyncPoint, SyncPointType };
+export type { SyncPoint, SyncPointType, AnalysisSettings, MusicType };
 
 export interface ProjectState {
   // Audio
@@ -46,18 +46,25 @@ export interface ProjectState {
   teaserDuration: number; // Duration of the finished pot reveal at start (in seconds)
   exportAudioMode: 'include' | 'video-only'; // Whether to include audio in export
   selectedSongName: string | null; // For reminding user what song to add in TikTok
+  analysisSettings: AnalysisSettings; // Settings for audio analysis sensitivity
 
   // Timeline - now based on sync points
   timeline: Array<{
-    snippetId: string;
+    snippetId: string;       // Keep for compatibility
+    videoId: string;         // Which video this comes from
+    sourcePosition: number;  // Position within source video (seconds)
     syncPointIndex: number;
-    startTime: number;
-    endTime: number;
+    startTime: number;       // Timeline start time
+    endTime: number;         // Timeline end time
   }>;
 
   // Export
   isExporting: boolean;
   exportProgress: number;
+
+  // Playback (for smooth preview animation)
+  currentPlaybackTime: number;
+  isPreviewPlaying: boolean;
 
   // Actions
   setAudio: (file: File | null) => void;
@@ -76,9 +83,12 @@ export interface ProjectState {
   setTeaserDuration: (seconds: number) => void;
   setExportAudioMode: (mode: 'include' | 'video-only') => void;
   setSelectedSongName: (name: string | null) => void;
+  setAnalysisSettings: (settings: AnalysisSettings) => void;
   setTimeline: (timeline: ProjectState['timeline']) => void;
   setExporting: (isExporting: boolean) => void;
   setExportProgress: (progress: number) => void;
+  setCurrentPlaybackTime: (time: number) => void;
+  setIsPreviewPlaying: (playing: boolean) => void;
   reset: () => void;
 }
 
@@ -96,9 +106,12 @@ const initialState = {
   teaserDuration: 2, // 2 seconds for the finished pot reveal
   exportAudioMode: 'video-only' as const, // Default to video-only for TikTok workflow
   selectedSongName: null,
+  analysisSettings: { musicType: 'standard' } as AnalysisSettings,
   timeline: [],
   isExporting: false,
   exportProgress: 0,
+  currentPlaybackTime: 0,
+  isPreviewPlaying: false,
 };
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -151,11 +164,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   setSelectedSongName: (name) => set({ selectedSongName: name }),
 
+  setAnalysisSettings: (settings) => set({ analysisSettings: settings }),
+
   setTimeline: (timeline) => set({ timeline }),
 
   setExporting: (isExporting) => set({ isExporting }),
 
   setExportProgress: (progress) => set({ exportProgress: progress }),
+
+  setCurrentPlaybackTime: (time) => set({ currentPlaybackTime: time }),
+
+  setIsPreviewPlaying: (playing) => set({ isPreviewPlaying: playing }),
 
   reset: () => set(initialState),
 }));
