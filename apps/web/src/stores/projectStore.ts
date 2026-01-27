@@ -19,6 +19,11 @@ export interface Snippet {
   qualityScore: number;
 }
 
+export interface Beat {
+  time: number;
+  strength: number;
+}
+
 // Re-export for convenience
 export type { SyncPoint, SyncPointType };
 
@@ -28,6 +33,8 @@ export interface ProjectState {
   audioUrl: string | null;
   syncPoints: SyncPoint[];
   audioDuration: number | null;
+  bpm: number | null;
+  beats: Beat[];
 
   // Videos
   videos: VideoSegment[];
@@ -57,6 +64,8 @@ export interface ProjectState {
   setAudioUrl: (url: string | null) => void;
   setSyncPoints: (syncPoints: SyncPoint[]) => void;
   setAudioDuration: (duration: number | null) => void;
+  setBpm: (bpm: number | null) => void;
+  setBeats: (beats: Beat[]) => void;
   addVideo: (video: VideoSegment) => void;
   removeVideo: (id: string) => void;
   updateVideo: (id: string, updates: Partial<VideoSegment>) => void;
@@ -78,6 +87,8 @@ const initialState = {
   audioUrl: null,
   syncPoints: [] as SyncPoint[],
   audioDuration: null,
+  bpm: null,
+  beats: [] as Beat[],
   videos: [],
   outputLength: 30,
   snippetSelection: 'quality' as const,
@@ -100,6 +111,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setSyncPoints: (syncPoints) => set({ syncPoints }),
 
   setAudioDuration: (duration) => set({ audioDuration: duration }),
+
+  setBpm: (bpm) => set({ bpm }),
+
+  setBeats: (beats) => set({ beats }),
 
   addVideo: (video) =>
     set((state) => ({ videos: [...state.videos, video] })),
