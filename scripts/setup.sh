@@ -31,25 +31,20 @@ else
 fi
 
 echo ""
-echo "Checking Node.js..."
+echo "Checking Bun..."
 
-# Check for Node.js
-if ! command -v node &> /dev/null; then
-    echo "Node.js not found. Please install Node.js 18 or higher:"
-    echo "  brew install node"
-    exit 1
+# Check for Bun
+if ! command -v bun &> /dev/null; then
+    echo "Bun not found. Installing..."
+    curl -fsSL https://bun.sh/install | bash
+    export PATH="$HOME/.bun/bin:$PATH"
 else
-    NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ "$NODE_VERSION" -lt 18 ]; then
-        echo "Node.js version is too old. Please upgrade to v18 or higher."
-        exit 1
-    fi
-    echo "Node.js: $(node -v)"
+    echo "Bun: $(bun --version)"
 fi
 
 echo ""
-echo "Installing npm dependencies..."
-npm install
+echo "Installing dependencies..."
+bun install
 
 echo ""
 echo "Creating required directories..."
@@ -62,7 +57,7 @@ echo "Setup complete!"
 echo "============================"
 echo ""
 echo "To start the app:"
-echo "  npm run dev"
+echo "  bun run dev"
 echo ""
 echo "Then open http://localhost:3000 in your browser."
 echo ""

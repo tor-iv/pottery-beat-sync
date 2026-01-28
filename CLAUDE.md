@@ -10,24 +10,24 @@ PotteryBeatSync is a video beat sync tool for creating TikTok pottery videos. It
 
 ```bash
 # Install dependencies and system requirements (requires Homebrew)
-npm run setup
+bun run setup
 
 # Development (runs both web and server)
-npm run dev
+bun run dev
 
 # Run individually
-npm run dev:web     # Next.js frontend on :3000
-npm run dev:server  # Express backend on :3001
+bun run dev:web     # Next.js frontend on :3000
+bun run dev:server  # Express backend on :3001
 
 # Build
-npm run build
+bun run build
 ```
 
-**System requirements:** FFmpeg and yt-dlp (installed via `npm run setup`)
+**System requirements:** Bun, FFmpeg, and yt-dlp (installed via `bun run setup`)
 
 ## Architecture
 
-This is a monorepo with npm workspaces containing two apps:
+This is a monorepo with Bun workspaces containing two apps:
 
 ### apps/web (Next.js 14 + React)
 - **State:** Zustand store (`stores/projectStore.ts`) holds all project state (audio, videos, settings, timeline)

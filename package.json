@@ -7,13 +7,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces --if-present",
-    "dev:web": "npm run dev -w apps/web",
-    "dev:server": "npm run dev -w apps/server",
-    "build": "npm run build --workspaces --if-present",
+    "dev": "bun run --filter '*' dev",
+    "dev:web": "bun run --cwd apps/web dev",
+    "dev:server": "bun run --cwd apps/server dev",
+    "build": "bun run --filter '*' build",
     "setup": "bash scripts/setup.sh"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
