@@ -50,8 +50,9 @@ export async function detectSilenceEnd(inputPath: string): Promise<number | null
 }
 
 /**
- * Trim audio at the detected silence point + buffer.
- * If silence is detected, trims the audio to end at silence_start + bufferSeconds.
+ * Trim audio at the detected silence point - buffer.
+ * If silence is detected, trims the audio to end at silence_start - bufferSeconds.
+ * This cuts BEFORE the silence starts to remove any quiet/fade section.
  * If no silence is detected, leaves the audio unchanged.
  */
 export async function trimAtSilence(inputPath: string, bufferSeconds: number = 0.5): Promise<void> {
@@ -62,9 +63,9 @@ export async function trimAtSilence(inputPath: string, bufferSeconds: number = 0
     return;
   }
 
-  // Calculate trim point (silence start + buffer)
-  const trimPoint = silenceStart + bufferSeconds;
-  console.log(`Detected silence at ${silenceStart}s, trimming to ${trimPoint}s`);
+  // Calculate trim point (cut 0.5s BEFORE silence starts to remove quiet section)
+  const trimPoint = Math.max(0, silenceStart - bufferSeconds);
+  console.log(`Detected silence at ${silenceStart.toFixed(2)}s, trimming to ${trimPoint.toFixed(2)}s (${bufferSeconds}s before silence)`);
 
   // Create temp output path
   const outputPath = inputPath.replace('.mp3', '-trimmed.mp3');
