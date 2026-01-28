@@ -12,7 +12,7 @@ export async function detectSilenceEnd(inputPath: string): Promise<number | null
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', [
       '-i', inputPath,
-      '-af', 'silencedetect=noise=-50dB:d=0.3',
+      '-af', 'silencedetect=noise=-40dB:d=0.3',
       '-f', 'null',
       '-',
     ]);
